@@ -1,0 +1,12 @@
+name: ESA_FINAL_GAME
+title: ESA_FINAL_GAME
+username:
+account: xinyunwu
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3986429
+bundleId: 4486631
+url: https://xinyunwu.shinyapps.io/ESA_FINAL_GAME/
+when: 1618749707.30365
+asMultiple: FALSE
+asStatic: FALSE
