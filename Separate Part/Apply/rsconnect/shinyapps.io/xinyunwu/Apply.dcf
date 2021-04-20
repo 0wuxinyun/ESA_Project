@@ -1,0 +1,12 @@
+name: Apply
+title: Apply
+username:
+account: xinyunwu
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3873053
+bundleId: 4402071
+url: https://xinyunwu.shinyapps.io/Apply/
+when: 1616872360.93225
+asMultiple: FALSE
+asStatic: FALSE

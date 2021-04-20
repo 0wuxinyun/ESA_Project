@@ -1,0 +1,297 @@
+# At the beginning of any R session, record your AWS database password:
+source("setAWSPassword.R")
+
+# Now, anywhere in your code where the password is needed you can get it using
+#getOption("AWSPassword")
+# Otherwise it is hidden. So now this code can be shared with anyone 
+# without giving them access to your personal AWS database.
+
+source("usePackages(4).R")
+loadPkgs(c("shiny","DBI"))
+
+#References
+#https://shiny.rstudio.com/reference/shiny/latest/modalDialog.html
+#https://shiny.rstudio.com/reference/shiny/0.14/passwordInput.html
+#https://shiny.rstudio.com/articles/sql-injections.html
+#https://shiny.rstudio.com/reference/shiny/0.14/renderUI.html
+
+
+#Generate, or re-generate, HTML to create modal dialog for Password creation
+passwordModal <- function(failed = FALSE) {
+  modalDialog(
+    title = "Create a new password",
+    passwordInput("password1", "Enter a new password:"),
+    passwordInput("password2", "Confirm by re-entering the new password:"),
+    "If successful, you will be assigned a Player Name to go with this password.",
+    if (failed)
+      div(tags$b("The passwords do not match. Try again.", style = "color: red;")),
+    
+    footer = tagList(
+      modalButton("Cancel"),
+      actionButton("passwordok", "OK")
+    )
+  )
+}
+
+loginModal <- function(failed = FALSE) {
+  modalDialog(
+    title = "Login",
+    textInput("playername", "Enter your assigned Player Name", "WuXinyun"),
+    passwordInput("password3", "Enter your password:"),
+    if (failed)
+      div(tags$b("There is no registered player with that name and password. Try again or re-register.", style = "color: red;")),
+    
+    footer = tagList(
+      modalButton("Cancel"),
+      actionButton("loginok", "OK")
+    )
+  )
+}
+
+getAWSConnection <- function(){
+  conn <- dbConnect(
+    drv = RMySQL::MySQL(),
+    dbname = "student090",
+    host = "esddbinstance-1.ceo4ehzjeeg0.ap-southeast-1.rds.amazonaws.com",
+    username = "student090",
+    password = getOption("AWSPassword"))
+  conn
+}
+
+
+
+getPlayerID <- function(playername,password){
+
+  #open the connection
+  conn <- getAWSConnection()
+  #password could contain an SQL insertion attack
+  #Create a template for the query with placeholders for playername and password
+  querytemplate <- "SELECT * FROM LeaderPlayer WHERE playername=?id1 AND password=?id2;"
+  query<- sqlInterpolate(conn, querytemplate,id1=playername,id2=password)
+  print(query) #for debug
+  result <- dbGetQuery(conn,query)
+  # If the query is successful, result should be a dataframe with one row
+  if (nrow(result)==1){
+    playerid <- result$playerid[1]
+  } else {
+    print(result) #for debugging
+    playerid <- 0
+  }
+  #print(result)
+  #print(playerid)
+  #Close the connection
+  dbDisconnect(conn)
+  # return the playerid
+  playerid
+}
+
+getRandomPlayerName <- function(conn){
+  #Given a connection, call the View 'LeaderRandomName' and return the resulting name
+  result <- dbGetQuery(conn,"SELECT * FROM LeaderRandomName")
+  # result should be a dataframe with a single row and a column named 'playername'
+  playername <- result$playername[1]
+  # To test what happens when there is a duplicate entry, we can override the random result
+  #playername <- "SophisticatedImaginaryZoo" # This matches an existing player in my database
+  playername
+}
+
+createNewPlayerQuery <- function(conn,playername,password){
+  #password could contain an SQL insertion attack
+  #Create a template for the query with placeholder for  password
+  querytemplate <- "INSERT INTO LeaderPlayer (playername,password) VALUES (?id1,?id2);"
+  query<- sqlInterpolate(conn, querytemplate,id1=playername,id2=password)
+}
+
+registerPlayer <- function(password){
+  #open the connection
+  conn <- getAWSConnection()
+  playername <- getRandomPlayerName(conn)
+  query <- createNewPlayerQuery(conn,playername,password)
+  print(query) #for debug
+  # This query could fail to run properly so we wrap it in a loop with tryCatch()
+  success <- FALSE
+  iter <- 0
+  MAXITER <- 5
+  while(!success & iter < MAXITER){
+    iter <- iter+1
+    tryCatch(
+   
+      {  # This is not a SELECT query so we use dbExecute
+        result <- dbExecute(conn,query)
+        print(result)
+        success <- TRUE
+      }, error=function(cond){print("registerPlayer: ERROR")
+                              print(cond)
+                              # The query failed, likely because of a duplicate playername
+                              playername <- getRandomPlayerName(conn)
+                              query <- createNewPlayerQuery(conn,playername,password) }, 
+        warning=function(cond){print("registerPlayer: WARNING")
+                                print(cond)},
+      finally = {print(paste0("Iteration ",iter," done."))
+                }
+    )
+  } # end while loop
+  # This may not have been successful
+  if (!success) playername = NULL
+  #Close the connection
+  dbDisconnect(conn)
+  playername
+}
+
+getGameVariantList <- function(){
+  #open the connection
+  conn <- getAWSConnection()
+  gamevariants <- dbGetQuery(conn,"SELECT * FROM LeaderGameVariant")
+  variantids <- gamevariants$gamevariantid # a vector
+  variantnames <- gamevariants$variantname # a vector
+  names(variantids) <- variantnames
+  #Close the connection
+  dbDisconnect(conn)
+  variantids
+}
+
+publishScore <- function(playerid,gamevariantid,score){
+  conn <- getAWSConnection()
+  querytemplate <- "INSERT INTO LeaderScore (playerid,gamevariantid,asoftime,score) VALUES (?id1,?id2,NOW(),?id3)"
+  query <- sqlInterpolate(conn, querytemplate,id1=playerid,id2=gamevariantid,id3=score)
+  #print(query) #for debug
+  success <- FALSE
+  tryCatch(
+    {  # This is not a SELECT query so we use dbExecute
+      result <- dbExecute(conn,query)
+      print("Score published")
+      success <- TRUE
+    }, error=function(cond){print("publishScore: ERROR")
+      print(cond)
+    }, 
+    warning=function(cond){print("publishScore: WARNING")
+      print(cond)},
+    finally = {}
+  )
+  dbDisconnect(conn)
+}
+
+getLeaderBoard <- function(gamevariantid){
+  conn <- getAWSConnection()
+  #First, we need to know whether highscorewins for this game variant
+  query <- paste0("SELECT highscorewins FROM LeaderGameVariant WHERE gamevariantid=",gamevariantid)
+  result <- dbGetQuery(conn,query)
+  #result should return a single row
+  highscorewins <- result$highscorewins[1]
+  #Assemble the query for this gamevariantid
+  query <- "SELECT lp.playername,ls.score,ls.asoftime  FROM LeaderScore as ls INNER JOIN LeaderPlayer as lp"
+  query <- paste0(query," ON (ls.playerid=lp.playerid) WHERE ls.gamevariantid =")
+  query <- paste0(query,gamevariantid)
+  if (highscorewins)
+    query <- paste0(query, " ORDER BY ls.score DESC,ls.asoftime ASC")
+  else
+    query <- paste0(query, " ORDER BY ls.score ASC,ls.asoftime ASC")
+  print(query) # for debugging
+  result <- dbGetQuery(conn,query)
+  dbDisconnect(conn)
+  result
+}
+
+
+ui <- fluidPage(
+  actionButton("register", "Register"),
+  actionButton("login", "Login"),
+  htmlOutput("loggedInAs"),
+  selectInput("gamevariantid", "Select the Game Variant to Play:",
+              getGameVariantList()),
+  actionButton("playgame", "Play the Game"),
+  htmlOutput("score"),
+  uiOutput("moreControls")
+)
+
+server <- function(input, output, session) {
+  # reactiveValues object for storing items like the user password
+  vals <- reactiveValues(password = NULL,playerid=NULL,playername=NULL,gamevariantid=1,score=NULL)
+  
+  #Fire some code if the user clicks the Register button
+  observeEvent(input$register, {
+    showModal(passwordModal(failed=FALSE))
+  })
+  # Fire some code if the user clicks the passwordok button
+  observeEvent(input$passwordok, {
+    # Check that password1 exists and it matches password2
+    if (str_length(input$password1) >0 && (input$password1 == input$password2)) {
+      #store the password and close the dialog
+      vals$password <- input$password1
+      print(vals$password) # for debugging
+      vals$playername = registerPlayer(vals$password)
+      if (!is.null(vals$playername)){
+          vals$playerid <- getPlayerID(vals$playername,vals$password)
+      }
+      print(vals$playerid) # for debugging
+      removeModal()
+    } else {
+      showModal(passwordModal(failed = TRUE))
+    }
+  })
+  #Fire some code if the user clicks the Login button
+  observeEvent(input$login, {
+    showModal(loginModal(failed=FALSE))
+  })
+  # Fire some code if the user clicks the loginok button
+  observeEvent(input$loginok, {
+    # Get the playerID and check if it is valid
+    playerid <- getPlayerID(input$playername,input$password3)
+    if (playerid>0) {
+      #store the playerid and playername and close the dialog
+      vals$playerid <- playerid
+      #print(vals$playerid) # for debugging
+      vals$playername <- input$playername
+      #print(vals$playername) # for debugging
+      removeModal()
+    } else {
+      showModal(loginModal(failed = TRUE))
+    }
+    
+  })
+  
+  # React to successful login
+  output$loggedInAs <- renderUI({
+    if (is.null(vals$playername))
+      "Not logged in yet."
+    else
+      vals$playername
+  })
+  
+  observeEvent(input$playgame, {
+    vals$score = as.integer(runif(1,min=0,max=100))
+    print(vals$score)
+  })
+  
+  # React to completion of game
+  output$score <- renderUI({
+    if (is.null(vals$score))
+      "No score yet."
+    else
+      as.character(vals$score)
+  })
+  
+  
+  output$moreControls <- renderUI({
+    req(vals$score,vals$playerid) # if vals$score is NULL, the controls will not be visible
+    tagList(
+      actionButton("publishscore", "Publish Your Score"),
+      tableOutput("leaderboard")
+    )
+  })
+  observeEvent(input$publishscore,{
+    publishScore(vals$playerid,vals$gamevariantid,vals$score)
+  })
+  
+  # force refresh 
+  output$leaderboard <- renderTable({numclicks <- input$publishscore +input$playgame+vals$gamevariantid #to force a refresh whenever one of these buttons is clicked
+                                    leaderboard <- getLeaderBoard(vals$gamevariantid)
+                                    leaderboard}
+                                    )
+  # Update the gamevariantid : 
+  observeEvent(input$gamevariantid,{vals$gamevariantid=as.integer(input$gamevariantid)})
+  
+}
+
+
+shinyApp(ui, server)

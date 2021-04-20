@@ -1,0 +1,75 @@
+source("usePackages.R")
+loadPkgs(c("shiny","DBI","tidyverse"))
+
+library(shinydashboard)
+library(shiny)
+
+#source("setAWSPassword.R")
+
+getAWSConnection <- function(){
+  conn <- dbConnect(
+    drv = RMySQL::MySQL(),
+    dbname = "student033",
+    host = "esddbinstance-1.ceo4ehzjeeg0.ap-southeast-1.rds.amazonaws.com",
+    username = "student033",
+    password = getOption("AWSPassword"))
+  conn
+}
+
+getRandomSentence <- function(conn){
+  #Given a connection, call the View 'RandomSentence' and return the resulting name
+  result <- dbGetQuery(conn,"SELECT * FROM RandomSentence")
+  # result should be a dataframe with a single row and a column named 'randomname'
+  randomname <- result$randomname[1]
+  # To test what happens when there is a duplicate entry, we can override the random result
+  #randomname <- "SophisticatedImaginaryZoo" # This matches an existing player in my database
+  randomname
+}
+
+
+  
+
+# UI 
+ui <- dashboardPage(
+  dashboardHeader(title ="Skills Workshop Game"),
+  # Side bar
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Instruction",tabName = "Instruction", icon = icon("info")),
+      menuItem("Game", tabName="Game", icon = icon("gamepad"))
+    )
+  ))
+  
+  dashboardBody(
+    tabItems(
+      # instruction
+      tabItem(tabName = "Instruction",
+              h2("Welcome! Here are the instructions for the Skills Workshop game"),
+              tags$h4("Instructions"),
+              tags$p("Instruction text")
+              
+      )))
+      
+      # game
+      tabItem(tabName = "Game",
+              h2("Welcome to Skills Workshop game"),
+              # start button to initialze timer
+              actionButton("Start","Start"),
+              fluidRow(
+                box(
+                  # timer
+                  h2(textOutput("Time")),
+                  #textfield for player input
+                  textInput("text", h3("Text input"), 
+                            value = ""))   
+              )
+      )
+      
+
+      
+server <- function(input, output,session) {
+        # Game reactive values:
+  gamevals <- reactiveValues(
+                  
+shinyApp(ui, server)
+   

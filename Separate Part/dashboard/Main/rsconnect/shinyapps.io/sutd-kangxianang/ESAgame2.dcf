@@ -1,0 +1,12 @@
+name: ESAgame2
+title: ESAgame2
+username:
+account: sutd-kangxianang
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3907475
+bundleId: 4429516
+url: https://sutd-kangxianang.shinyapps.io/ESAGame2/
+when: 1617528051.55049
+asMultiple: FALSE
+asStatic: FALSE
